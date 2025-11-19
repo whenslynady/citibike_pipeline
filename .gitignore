@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+
+# MacOS
+.DS_Store
+
+# Airflow
+airflow-webserver.pid
+airflow.cfg
+airflow.db
+airflow_settings.yaml   # si li gen sensitifs
+
+# Astro
+astro/
+
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+
+# DBT
+dbt/*/target/
+dbt/*/logs/
+.dbt/profiles.yml
+
+# Logs
+*.log
+
+# Node / npm (si itilize)
+node_modules/
+
+# CI/CD (pa ignore .github!)

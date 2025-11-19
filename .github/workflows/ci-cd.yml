@@ -1,0 +1,111 @@
+name: CI-CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+
+  # -------------------------------------------------------------
+  # 1️⃣ ANALIZ KÒD + PYTEST + DBT TESTS
+  # -------------------------------------------------------------
+  tests:
+    name: Run Pytests + dbt Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: airflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U airflow"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install apache-airflow pytest pytest-mock dbt-bigquery
+
+      - name: 🧪 Run pytests
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/dags
+          pytest tests/ -v
+
+      - name: 🧪 dbt workflow
+        run: |
+          cd dbt/citibike_dbt_gcp
+          dbt debug --profiles-dir . --project-dir .
+          dbt deps
+          dbt compile
+          dbt test
+
+  # -------------------------------------------------------------
+  # 2️⃣ TERRAFORM VALIDATION
+  # -------------------------------------------------------------
+  terraform:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🧰 Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: 🔍 Terraform Init
+        working-directory: ./terraform
+        run: terraform init -backend=false
+
+      - name: 🔎 Terraform Validate
+        working-directory: ./terraform
+        run: terraform validate
+
+      - name: 🧹 Terraform Format Check
+        working-directory: ./terraform
+        run: terraform fmt -check
+
+      - name: 📝 Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan
+
+  # -------------------------------------------------------------
+  # 3️⃣ DEPLOY TO ASTRONOMER (SI OU VLE)
+  # -------------------------------------------------------------
+  deploy:
+    name: Deploy to Astro
+    needs: [tests, terraform]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🚀 Install Astro CLI
+        run: curl -sSL install.astronomer.io | sudo bash
+
+      - name: 🔐 Login to Astro
+        run: astro login ${{ secrets.ASTRO_API_URL }} --token ${{ secrets.ASTRO_TOKEN }}
+
+      - name: 🚀 Deploy to Astro
+        run: |
+          astro deploy ${{ secrets.ASTRO_DEPLOYMENT_ID }} --force
