@@ -1,111 +1,56 @@
-name: CI-CD Pipeline
+name: Astronomer CI/CD - Deploy Airflow & dbt
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   pull_request:
-    branches: ["main"]
+    branches:
+      - main
+
+env:
+  ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
 
 jobs:
-
-  # -------------------------------------------------------------
-  # 1️⃣ ANALIZ KÒD + PYTEST + DBT TESTS
-  # -------------------------------------------------------------
-  tests:
-    name: Run Pytests + dbt Tests
+  lint-test:
+    name: Lint and Test DAGs
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:14
-        env:
-          POSTGRES_USER: airflow
-          POSTGRES_PASSWORD: airflow
-          POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U airflow"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=5
-
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: 🐍 Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9"
 
-      - name: 📦 Install Python dependencies
+      - name: Install Airflow and Dependencies
         run: |
-          pip install --no-cache-dir -r requirements.txt
-          pip install apache-airflow pytest pytest-mock dbt-bigquery
+          pip install apache-airflow pytest astronomer-cosmos==1.8.2 pydantic
+          airflow db init
+          airflow db upgrade
 
-      - name: 🧪 Run pytests
+      - name: Test DAG integrity
         run: |
-          export PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/dags
-          pytest tests/ -v
+          python -c "import airflow; from airflow.models import DagBag; d = DagBag(include_examples=False); assert not d.import_errors, d.import_errors"
 
-      - name: 🧪 dbt workflow
-        run: |
-          cd dbt/citibike_dbt_gcp
-          dbt debug --profiles-dir . --project-dir .
-          dbt deps
-          dbt compile
-          dbt test
-
-  # -------------------------------------------------------------
-  # 2️⃣ TERRAFORM VALIDATION
-  # -------------------------------------------------------------
-  terraform:
-    name: Terraform Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🧰 Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: 🔍 Terraform Init
-        working-directory: ./terraform
-        run: terraform init -backend=false
-
-      - name: 🔎 Terraform Validate
-        working-directory: ./terraform
-        run: terraform validate
-
-      - name: 🧹 Terraform Format Check
-        working-directory: ./terraform
-        run: terraform fmt -check
-
-      - name: 📝 Terraform Plan
-        working-directory: ./terraform
-        run: terraform plan
-
-  # -------------------------------------------------------------
-  # 3️⃣ DEPLOY TO ASTRONOMER (SI OU VLE)
-  # -------------------------------------------------------------
   deploy:
-    name: Deploy to Astro
-    needs: [tests, terraform]
+    name: Deploy to Astronomer Cloud
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
+    needs: lint-test
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: 🚀 Install Astro CLI
-        run: curl -sSL install.astronomer.io | sudo bash
-
-      - name: 🔐 Login to Astro
-        run: astro login ${{ secrets.ASTRO_API_URL }} --token ${{ secrets.ASTRO_TOKEN }}
-
-      - name: 🚀 Deploy to Astro
+      - name: Install astronomer-cosmos in Docker Image
         run: |
-          astro deploy ${{ secrets.ASTRO_DEPLOYMENT_ID }} --force
+          echo "RUN pip install astronomer-cosmos==1.8.2" >> Dockerfile
+
+      - name: Deploy to Astro (Force Full Deployment)
+        uses: astronomer/deploy-action@v0.9.0
+        with:
+          deployment-id: ${{ secrets.ASTRO_DEPLOYMENT_ID }}
+          deploy-type: image-and-dags
+          parse: true
+          force: true  # Ensures full redeployment

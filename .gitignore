@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .venv/
 .env
+*.json
 
 # MacOS
 .DS_Store
@@ -30,6 +31,7 @@ dbt/*/logs/
 
 # Logs
 *.log
+plugins/__pycache__/
 
 # Node / npm (si itilize)
 node_modules/
